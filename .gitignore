@@ -1,0 +1,39 @@
+# Dependency files
+
+# Binary files
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Build files
+bin/
+
+# Test result files
+*.out
+*.test
+TESTRESULTS/
+
+# Logs
+*.log
+
+# IDE-specific files
+.vscode/
+.idea/
+*.iml
+
+# Temporary files
+*.tmp
+*.swp
+*.DS_Store
+Thumbs.db
+
+# Coverage files
+*.cover
+.coverage
+.cover.out
+
+# Others
+node_modules/
+.env
+
