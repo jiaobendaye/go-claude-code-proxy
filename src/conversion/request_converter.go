@@ -122,6 +122,12 @@ func ConvertClaudeToOpenai(claudeRequest *models.ClaudeMessagesRequest, modelMan
 		ToolChoice:  toolChoice,
 	}
 
+	if claudeRequest.Stream {
+		openaiRequest.StreamOptions = &openai.StreamOptions{
+			IncludeUsage: true,
+		}
+	}
+
 	return openaiRequest
 }
 

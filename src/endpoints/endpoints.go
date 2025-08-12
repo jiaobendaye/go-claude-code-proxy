@@ -107,7 +107,7 @@ func CreateMessage(c *gin.Context) {
 
 		// Send initial SSE events
 		messageId := "msg_" + strings.ReplaceAll(uuid.New().String(), "-", "")
-		c.Writer.WriteString("event: " + core.EVENT_MESSAGE_START + "\ndata:")
+		c.Writer.WriteString("event: " + core.EVENT_MESSAGE_START + "\ndata: ")
 		data, _ := json.Marshal(map[string]any{
 			"type": core.EVENT_MESSAGE_START,
 			"message": map[string]any{
@@ -128,7 +128,7 @@ func CreateMessage(c *gin.Context) {
 		c.Writer.WriteString("\n\n")
 		c.Writer.Flush()
 
-		c.Writer.WriteString("event: " + core.EVENT_CONTENT_BLOCK_START + "\ndata:")
+		c.Writer.WriteString("event: " + core.EVENT_CONTENT_BLOCK_START + "\ndata: ")
 		data, _ = json.Marshal(map[string]any{
 			"type":  core.EVENT_CONTENT_BLOCK_START,
 			"index": 0,
@@ -141,7 +141,7 @@ func CreateMessage(c *gin.Context) {
 		c.Writer.WriteString("\n\n")
 		c.Writer.Flush()
 
-		c.Writer.WriteString("event: " + core.EVENT_PING + "\ndata:")
+		c.Writer.WriteString("event: " + core.EVENT_PING + "\ndata: ")
 		data, _ = json.Marshal(map[string]any{
 			"type": core.EVENT_PING,
 		})
@@ -154,6 +154,9 @@ func CreateMessage(c *gin.Context) {
 		toolBlockIndex := 0
 		currentToolCalls := make(map[int]map[string]any)
 		finalStopReason := core.STOP_END_TURN
+		usageData := make(map[string]int)
+		usageData["input_tokens"] = 0
+		usageData["output_tokens"] = 0
 
 	forloop:
 		for {
@@ -162,7 +165,7 @@ func CreateMessage(c *gin.Context) {
 			case <-ctx.Done():
 				// Handle cancellation
 				log.Printf("Client disconnected, stopping stream processing %v", messageId)
-				c.Writer.WriteString("event: error\ndata:")
+				c.Writer.WriteString("event: error\ndata: ")
 				errorEvent := map[string]interface{}{
 					"type": "error",
 					"error": map[string]string{
@@ -183,7 +186,7 @@ func CreateMessage(c *gin.Context) {
 					break forloop
 				} else {
 					// Handle any streaming errors gracefully
-					c.Writer.WriteString("event: error\ndata:")
+					c.Writer.WriteString("event: error\ndata: ")
 					errorEvent := map[string]interface{}{
 						"type": "error",
 						"error": map[string]interface{}{
@@ -199,13 +202,21 @@ func CreateMessage(c *gin.Context) {
 				log.Printf("Error receiving stream: %v\n", err)
 				return
 			}
+			// Convert Usage data from OpenAI response to Claude format
+			if response.Usage != nil {
+				usageData["input_tokens"] = response.Usage.PromptTokens
+				usageData["output_tokens"] = response.Usage.CompletionTokens
+				if response.Usage.PromptTokensDetails != nil {
+					usageData["cache_read_input_tokens"] = response.Usage.PromptTokensDetails.CachedTokens
+				}
+			}
 
 			// Convert OpenAI streaming response to Claude streaming format.
 			if len(response.Choices) > 0 {
 				choice := response.Choices[0]
 				// Handle text delta
 				if choice.Delta.Content != "" {
-					c.Writer.WriteString("event: " + core.EVENT_CONTENT_BLOCK_DELTA + "\ndata:")
+					c.Writer.WriteString("event: " + core.EVENT_CONTENT_BLOCK_DELTA + "\ndata: ")
 					deltaData := map[string]interface{}{
 						"type":  core.EVENT_CONTENT_BLOCK_DELTA,
 						"index": textBlockIndex,
@@ -222,7 +233,10 @@ func CreateMessage(c *gin.Context) {
 
 				// Handle tool call deltas with improved incremental processing
 				for _, toolCall := range choice.Delta.ToolCalls {
-					toolCallIndex := *toolCall.Index
+					toolCallIndex := 0
+					if toolCall.Index != nil {
+						toolCallIndex = *toolCall.Index
+					}
 					if _, exists := currentToolCalls[toolCallIndex]; !exists {
 						currentToolCalls[toolCallIndex] = map[string]interface{}{
 							"id":           nil,
@@ -250,7 +264,7 @@ func CreateMessage(c *gin.Context) {
 						toolBlockIndex++
 						toolCallEntry["claude_index"] = textBlockIndex + toolBlockIndex
 						toolCallEntry["started"] = true
-						c.Writer.WriteString("event: " + core.EVENT_CONTENT_BLOCK_START + "\ndata:")
+						c.Writer.WriteString("event: " + core.EVENT_CONTENT_BLOCK_START + "\ndata: ")
 						contentBlockStart := map[string]interface{}{
 							"type":  core.EVENT_CONTENT_BLOCK_START,
 							"index": toolCallEntry["claude_index"],
@@ -273,20 +287,20 @@ func CreateMessage(c *gin.Context) {
 						var parsedArgs map[string]interface{}
 						if json.Unmarshal([]byte(toolCallEntry["args_buffer"].(string)), &parsedArgs) == nil {
 							if !toolCallEntry["json_sent"].(bool) {
-								c.Writer.WriteString("event: " + core.EVENT_CONTENT_BLOCK_DELTA + "\ndata:")
+								c.Writer.WriteString("event: " + core.EVENT_CONTENT_BLOCK_DELTA + "\ndata: ")
 								contentBlockDelta := map[string]interface{}{
 									"type":  core.EVENT_CONTENT_BLOCK_DELTA,
 									"index": toolCallEntry["claude_index"],
-									"delta": map[string]interface{}{
+									"delta": map[string]string{
 										"type":         core.DELTA_INPUT_JSON,
-										"partial_json": parsedArgs,
+										"partial_json": toolCallEntry["args_buffer"].(string),
 									},
 								}
 								contentDeltaJSON, _ := json.Marshal(contentBlockDelta)
 								c.Writer.Write(contentDeltaJSON)
 								c.Writer.WriteString("\n\n")
-								toolCallEntry["json_sent"] = true
 								c.Writer.Flush()
+								toolCallEntry["json_sent"] = true
 							}
 						}
 					}
@@ -294,8 +308,6 @@ func CreateMessage(c *gin.Context) {
 
 				// Handle finish reason
 				switch choice.FinishReason {
-				case "stop":
-					finalStopReason = core.STOP_END_TURN
 				case "length":
 					finalStopReason = core.STOP_MAX_TOKENS
 				case "tool_calls", "function_call":
@@ -313,7 +325,7 @@ func CreateMessage(c *gin.Context) {
 		for _, toolData := range currentToolCalls {
 			if toolDataStarted, ok := toolData["started"].(bool); ok && toolDataStarted {
 				claudeIndex, _ := toolData["claude_index"].(int)
-				c.Writer.WriteString("event: " + core.EVENT_CONTENT_BLOCK_STOP + "\ndata:")
+				c.Writer.WriteString("event: " + core.EVENT_CONTENT_BLOCK_STOP + "\ndata: ")
 				contentBlockStop := map[string]interface{}{
 					"type":  core.EVENT_CONTENT_BLOCK_STOP,
 					"index": claudeIndex,
@@ -324,12 +336,13 @@ func CreateMessage(c *gin.Context) {
 				c.Writer.Flush()
 			}
 		}
-		c.Writer.WriteString("event: " + core.EVENT_MESSAGE_DELTA + "\ndata:")
+		c.Writer.WriteString("event: " + core.EVENT_MESSAGE_DELTA + "\ndata: ")
 		messageDelta := map[string]interface{}{
 			"type": core.EVENT_MESSAGE_DELTA,
 			"delta": map[string]interface{}{
 				"stop_reason":   finalStopReason,
 				"stop_sequence": nil,
+				"usage":         usageData,
 			},
 		}
 		messageDeltaJSON, _ := json.Marshal(messageDelta)
@@ -337,7 +350,7 @@ func CreateMessage(c *gin.Context) {
 		c.Writer.WriteString("\n\n")
 		c.Writer.Flush()
 
-		c.Writer.WriteString("event: " + core.EVENT_MESSAGE_STOP + "\ndata:")
+		c.Writer.WriteString("event: " + core.EVENT_MESSAGE_STOP + "\ndata: ")
 		messageStop := map[string]string{
 			"type": core.EVENT_MESSAGE_STOP,
 		}
