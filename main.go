@@ -4,8 +4,8 @@ import (
 	"log"
 	"strconv"
 
-	"github.com/jiaobendaye/go-claude-code-proxy/src/core"
-	"github.com/jiaobendaye/go-claude-code-proxy/src/endpoints"
+	"github.com/jiaobendaye/go-claude-code-proxy/core"
+	"github.com/jiaobendaye/go-claude-code-proxy/endpoints"
 	"github.com/joho/godotenv"
 )
 

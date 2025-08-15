@@ -1,6 +1,6 @@
 module github.com/jiaobendaye/go-claude-code-proxy
 
-go 1.19
+go 1.21
 
 require (
 	github.com/gin-gonic/gin v1.10.1

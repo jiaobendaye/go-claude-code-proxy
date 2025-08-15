@@ -3,8 +3,8 @@ package conversion
 import (
 	"encoding/json"
 
-	"github.com/jiaobendaye/go-claude-code-proxy/src/core"
-	"github.com/jiaobendaye/go-claude-code-proxy/src/models"
+	"github.com/jiaobendaye/go-claude-code-proxy/core"
+	"github.com/jiaobendaye/go-claude-code-proxy/models"
 	"github.com/sashabaranov/go-openai"
 )
 
